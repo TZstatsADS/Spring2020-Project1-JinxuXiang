@@ -1,0 +1,799 @@
+---
+title: "The truth behind the lyrics"
+output:
+  pdf_document: default
+  html_document: default
+---
+## Author: Jinxu Xiang
+```{r, warning=FALSE, message=FALSE,echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+packages.used=c("tm", "tidytext","tidyverse","DT","wordcloud","scales","gridExtra","ngram","igraph","ggraph","rsconnect")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+
+# load packages
+library(tm)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(wordcloud)
+library(wordcloud2)
+library(scales)
+library(gridExtra)
+library(ngram)
+library(igraph)
+library(ggraph)
+library(rsconnect)
+library(ggplot2)
+library(shiny)
+library(data.table)
+```
+
+This report is prepared with the following environmental settings.
+
+```{r}
+print(R.version)
+```
+
+```{r read data, warning=FALSE, message=FALSE, echo=FALSE}
+# load lyrics data
+load('../data/lyrics.RData') 
+```
+
+```{r text processing in tm, warning=FALSE, message=FALSE, echo=FALSE}
+# function for removimg leading and trailing whitespace from character strings 
+leadingWhitespace <- content_transformer(function(x) str_trim(x, side = "both"))
+# remove stop words
+data("stop_words")
+word <- c("lot", "today", "months", "month", "wanna", "wouldnt", "wasnt", "ha", "na", "ooh", "da",
+        "gonna", "im", "dont", "aint", "wont", "yeah", "la", "oi", "nigga", "fuck",
+          "hey", "year", "years", "last", "past", "feel")
+stop_words <- c(stop_words$word, word)
+# clean the data and make a corpus
+corpus <- VCorpus(VectorSource(dt_lyrics$lyrics))%>%
+  tm_map(content_transformer(tolower))%>%
+  tm_map(removePunctuation)%>%
+  tm_map(removeWords, character(0))%>%
+  tm_map(removeWords, stop_words)%>%
+  tm_map(removeNumbers)%>%
+  tm_map(stripWhitespace)%>%
+  tm_map(leadingWhitespace)
+```
+
+```{r stemming, warning=FALSE, message=FALSE, echo=FALSE}
+stemmed <- tm_map(corpus, stemDocument) %>%
+  tidy() %>%
+  select(text)
+```
+
+```{r tidy dictionary, warning=FALSE, message=FALSE, echo=FALSE}
+dict <- tidy(corpus) %>%
+  select(text) %>%
+  unnest_tokens(dictionary, text)
+```
+
+```{r tidy stems with dictionary, warning=FALSE, message=FALSE, echo=FALSE}
+completed <- stemmed %>%
+  mutate(id = row_number()) %>%
+  unnest_tokens(stems, text) %>%
+  bind_cols(dict) 
+```
+
+```{r stem completion, warning=FALSE, message=FALSE, echo=FALSE}
+completed <- completed %>%
+  group_by(stems) %>%
+  count(dictionary) %>%
+  mutate(word = dictionary[which.max(n)]) %>%
+  ungroup() %>%
+  select(stems, word) %>%
+  distinct() %>%
+  right_join(completed) %>%
+  select(-stems)
+```
+
+```{r reverse unnest, warning=FALSE, message=FALSE, echo=FALSE}
+completed <- completed %>%
+  group_by(id) %>%
+  summarise(stemmedwords= str_c(word, collapse = " ")) %>%
+  ungroup()
+```
+
+```{r cleaned hm_data, warning=FALSE, message=FALSE, echo=FALSE}
+dt_lyrics <- dt_lyrics %>%
+  mutate(id = row_number()) %>%
+  inner_join(completed)
+```
+
+```{r export data lyrics, warning=FALSE, message=FALSE, echo=FALSE}
+save(dt_lyrics, file="../output/processed_lyrics.RData")
+```
+
+First,I process the raw textual data 'lyrics.RData' saved in 'data' file by cleaning data, removing stopwords and creating a tidy version of texts which is saved in 'output' file.
+
+```{r load data lyrics, warning=FALSE, message=FALSE, echo=FALSE}
+# load lyrics data
+load('../output/processed_lyrics.RData') 
+# load artist information
+dt_artist <- fread('../data/artists.csv') 
+# join two data by artist
+dt_join = left_join(dt_lyrics, dt_artist, by = c('artist' = 'Artist')) %>%
+  mutate(artist = ifelse(is.na(artist), 'Other', artist)) %>% 
+  select(-song, -lyrics, -Intro, - Formed, -Members) %>% 
+  filter(year > 1900)
+
+# Change all American cities' name in Origin to 'American' and only leave country names.
+
+dt_country = dt_join %>% 
+  separate(Origin, into = c('city','country'), sep = ',') %>%
+  mutate(country= ifelse(is.na(country), 'Other', country)) %>%
+  mutate(country = substr(country, 2, nchar(country))) 
+
+state_to_name = dt_country$country %>% unique()
+state_to_name = state_to_name[substr(state_to_name,1,2) %in% state.abb]
+state_to_name = tibble(state = state_to_name) %>% 
+  mutate(num = map_dbl(state, ~which(substr(.x,1,2) == state.abb))) %>% 
+  mutate(name = state.name[num]) %>% 
+  select(-num)
+
+dt_country = dt_country %>% left_join(state_to_name, by = c('country' = 'state')) %>% 
+  mutate(country = ifelse(is.na(name), country, name)) %>%
+  arrange(country) %>% 
+  select(-city, -name)
+```
+
+```{r export data join, warning=FALSE, message=FALSE, echo=FALSE}
+save(dt_join, file="../output/processed_join.RData")
+save(dt_country, file="../output/processed_country.RData")
+```
+
+```{r load data join, warning=FALSE, message=FALSE, echo=FALSE}
+load('../output/processed_join.RData')
+load('../output/processed_country.RData') 
+```
+
+Then,I combine the processed text with artist information 'artists.csv' and saved the joint data in 'output' file. The 'Origin' column of joint data contains the name of city and country (or state in America). So I extracted the names of each reigon and saved it as 'Precessed_country'.
+
+```{r my theme, warning=FALSE, message=FALSE, echo=FALSE}
+# My theme
+my_theme = theme_light() + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+```
+
+```{r word frequency, warning=FALSE, message=FALSE, echo=FALSE}
+# Stemmed words data
+dt_stemmedwords = dt_lyrics %>% 
+  select(id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>% 
+  group_by(id, word) %>% 
+  unique() %>% 
+  ungroup()
+# Word Frequency
+word_freq = dt_stemmedwords %>% 
+  group_by(word) %>%
+  count() %>% 
+  ungroup()
+word_freq = word_freq%>%
+  mutate(freq = n/nrow(word_freq)) %>%
+  arrange(desc(freq))
+```
+
+```{r word frequency all, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_all = word_freq[1:20,] %>% 
+  mutate(word = reorder(word, freq)) %>%
+  ggplot(aes(x = word, y = freq)) + 
+  geom_col(fill = 'orange',alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Word Frequency of All Lyrics", y = "Word Frequency") + 
+  my_theme
+gcol_all
+```
+
+```{r wordcloud all, warning=FALSE, message=FALSE, echo=FALSE}
+wordcloud(word_freq$word,word_freq$n,
+          scale=c(3,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.2,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Oranges"))
+```
+
+This is the wordcloud of all lyrics. As you can see, the word 'love', 'light', 'heartlife', 'dream' etc. appear many times. Most of words in this graph are positive. However, words like 'ill', 'die' and 'cry' also appear frenquently. But compared to the previous words, the number and frequency of negative words are significantly lower. Although at this time we will think that most music is positive, is it true that most of music is positive?
+
+### Question 1 - Is it true that most of music is positive?
+
+To quickly find answers, first I make a dynamic shinyapp to search keywords under different condition. I designed the drop-down tab to select different genres and regions, and the slider to select the year interval. If you want to select all genres or regions, you can select 'All genres' or 'All Region'. (However, this cannot be displayed after being stored as html)
+
+```{r list, warning=FALSE, message=FALSE, echo=FALSE}
+# List of country
+country_list = dt_country %>% select(country) %>% unique()
+country_list = rbind('All Region', country_list)
+# List of genre
+genre_list <- c("All Genre", "Folk", "R&B", "Electronic", "Jazz", "Indie", "Country", "Rock", "Metal", "Pop", "Hip-Hop", "Other")
+# The first year and the last year of data
+year = c(min(dt_join$year[dt_join$year>1900]), max(dt_join$year))
+
+corpus <- VCorpus(VectorSource(dt_lyrics$stemmedwords))
+word_tibble <- tidy(corpus) %>%
+  select(text) %>%
+  mutate(id = row_number()) %>%
+  unnest_tokens(word, text)
+```
+
+```{r ui, warning=FALSE, message=FALSE, echo=FALSE}
+ui <- navbarPage(strong("Lyrics Analysis"),
+  tabPanel("Select on a global scale",
+    titlePanel("Most frequent words"),
+    sidebarLayout(
+      sidebarPanel(
+        selectInput('genre1', 'Genre:', 
+                    genre_list, selected='All Genre'),
+        selectInput('country1', 'Region:', 
+                    country_list, selected='All Region'),
+        sliderInput("year1", "Year Interval:",
+                min = year[1], max = year[2], value = c(year[1], year[2])),
+        sliderInput("nwords1", "Number of terms:",
+                    min = 5, max = 100, value = 50)
+      ),
+      mainPanel(
+        wordcloud2Output(outputId = "country", height = "300")
+      )
+    )
+  ),
+  
+  tabPanel("Data", 
+           DT::dataTableOutput("table"))
+)
+```
+
+```{r server, warning=FALSE, message=FALSE, echo=FALSE}
+server <- function(input, output) {
+  # Use if and else to distinguish all select and part select.
+  output$country <- renderWordcloud2({
+    if(input$country1 == 'All Region' & input$genre1 == 'All Genre'){
+      count(
+      filter(
+        word_tibble, 
+        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
+      ), 
+      word, sort = TRUE
+    ) %>%
+      slice(1:input$nwords1) %>%
+      wordcloud2(size=0.6, rotateRatio=0.2)
+    }
+    else if(input$country1 != 'All Region' & input$genre1 == 'All Genre'){
+      count(
+      filter(
+        word_tibble, 
+        id %in% which(dt_country$country == input$country1), 
+        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
+      ), 
+      word, sort = TRUE
+    ) %>%
+      slice(1:input$nwords1) %>%
+      wordcloud2(size=0.6, rotateRatio=0.2)
+    }
+    else if(input$country1 == 'All Region' & input$genre1 != 'All Genre'){
+      count(
+      filter(
+        word_tibble, 
+        id %in% which(dt_lyrics$genre == input$genre1), 
+        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
+      ), 
+      word, sort = TRUE
+    ) %>%
+      slice(1:input$nwords1) %>%
+      wordcloud2(size=0.6, rotateRatio=0.2)
+    }
+    else{
+      count(
+      filter(
+        word_tibble, 
+        id %in% which(dt_country$country == input$country1), 
+        id %in% which(dt_lyrics$genre == input$genre1), 
+        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
+      ), 
+      word, sort = TRUE
+    ) %>%
+      slice(1:input$nwords1) %>%
+      wordcloud2(size=0.6, rotateRatio=0.2)
+    }
+  })
+  
+  output$table <- DT::renderDataTable({
+    DT::datatable(dt_join)
+  })
+}
+```
+
+```{r shiny app, warning=FALSE, message=FALSE}
+shinyApp(ui, server)
+```
+
+After using shinyapp to control variables, I have a preliminary understanding of the question I want to do. Next I use dataset 'bing' (from Bing Liu and collaborators, https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html) to distinguish positive and negative words. 
+
+First,I gave positive and negative words +1 score and -1 score respectively. Then, I scored and summed all stemmed words in each piece of lyrics. For the total score obtained, if the total score is positive, it will be classified as positive music, and if the total score is negative, it will be classified as negative music. I used two scoring methods. The first one counts the repeated words in each stemmed lyrics, and the second one counts the repeated words only once in each stemmed lyrics. The two types of score statistics are as follows.
+
+```{r emotion words, warning=FALSE, message=FALSE, echo=FALSE}
+#Negative words
+negative = get_sentiments("bing") %>% 
+  filter(sentiment == 'negative') %>% 
+  select(word) %>% 
+  unlist()
+#Positive words
+positive = get_sentiments("bing") %>% 
+  filter(sentiment == 'positive') %>% 
+  select(word) %>% 
+  unlist()
+```
+
+```{r scored id1, warning=FALSE, message=FALSE, echo=FALSE}
+# ID and scores when counting each word repeatly
+score_id1 = dt_join %>%
+  select(id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>% 
+  mutate(type = ifelse(word %in% positive, 1, 0)) %>% 
+  mutate(type = type + ifelse(word %in% negative, -1, 0)) %>% 
+  group_by(id) %>% 
+  summarize(type = sum(type))
+```
+
+```{r scored graph1, warning=FALSE, message=FALSE, echo=FALSE}
+gbar_emotionscore1 = score_id1 %>% 
+  arrange(type) %>% 
+  filter(type >= quantile(score_id1$type,0.01), 
+         type <= quantile(score_id1$type,0.99)) %>%
+  ggplot(aes(x = type)) + 
+  geom_histogram(bins = quantile(score_id1$type,0.99) - quantile(score_id1$type,0.01) + 1, fill = 'yellow', alpha = 0.8) + 
+  labs(title = 'Music Positive and Negative Emotion Distribution Graph',
+       subtitle = 'Count Each Word Repeatedly in Each Music',
+       x = 'Emotion Score', y = 'Number of Songs') +
+  my_theme
+gbar_emotionscore1
+```
+
+```{r scored id2, warning=FALSE, message=FALSE, echo=FALSE}
+# ID and scores when counting each word only once
+score_id2 = dt_join %>%
+  select(id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>% 
+  group_by(id, word) %>% 
+  unique() %>%
+  ungroup() %>% 
+  mutate(type = ifelse(word %in% positive, 1, 0)) %>% 
+  mutate(type = type + ifelse(word %in% negative, -1, 0)) %>% 
+  group_by(id) %>% 
+  summarize(type = sum(type))
+```
+
+```{r scored graph2, warning=FALSE, message=FALSE, echo=FALSE}
+gbar_emotionscore2 = score_id2 %>% 
+  arrange(type) %>% 
+  filter(type >= quantile(score_id2$type,0.01), 
+         type <= quantile(score_id2$type,0.99)) %>%
+  ggplot(aes(x = type)) + 
+  geom_histogram(bins = quantile(score_id2$type,0.99) - quantile(score_id2$type,0.01) + 1, fill = 'yellow', alpha = 0.8) + 
+  labs(title = 'Music Positive and Negative Emotion Distribution Graph',
+       subtitle = 'Count Each Word Only Once in Each Music', 
+       x = 'Emotion Score', y = 'Number of Songs') +
+  my_theme
+gbar_emotionscore2
+```
+
+These two graphs above are the opposite of what I said before. Even though positive words occupy most of the wordcloud, about 70% musics use more negative words. In addition, the emotion score which each word only count once looks like Poisson distribution. This property may be used in more places. 
+
+The statistical model of this data is too good, it is difficult to imagine that the 120,000 data can get a distribution that looks a lot like the real distribution. In addition, considering that there are many strange author names, song names and lyrics in this dataset, it will increase people's doubt about the reality of this dataset.
+
+Since more negative words are shown below the appearance of positive words, so where, when and what kind of music use negative words more? Where, when and what kind of music use positive words more? The following graphs make statistics of different categories of lyrics.
+
+```{r emotion id, warning=FALSE, message=FALSE, echo=FALSE}
+# ID of negative songs
+negative_id = score_id1 %>% 
+  filter(type < 0) %>% 
+  select(id) %>% 
+  unlist()
+# ID of positive songs
+positive_id = score_id1 %>% 
+  filter(type > 0) %>% 
+  select(id) %>% 
+  unlist()
+# Data of negative songs
+dt_negative = dt_country %>% 
+  filter(id %in% negative_id)
+# Data of positive songs
+dt_positive = dt_country %>% 
+  filter(id %in% positive_id)
+```
+
+```{r proportion of emotion1, warning=FALSE, message=FALSE, echo=FALSE}
+# Number of negative songs group by genre
+num_genre_negative = dt_negative %>% 
+  group_by(genre) %>% 
+  count(name = 'n1')
+# Number of positive songs group by genre
+num_genre_positive = dt_positive %>% 
+  group_by(genre) %>% 
+  count(name = 'n1')
+# Number of all songs group by genre
+num_genre = dt_lyrics %>% 
+  group_by(genre) %>% 
+  count(name = 'n2') %>% 
+  arrange(desc(n2))
+# Proportion of negative songs
+prop_genre_negative = left_join(num_genre_negative, num_genre, by = 'genre') %>%
+  mutate(prop = n1/n2) %>% 
+  select(genre, prop) %>% 
+  arrange(desc(prop)) %>%
+  ungroup()
+# Proportion of negative songs
+prop_genre_positive = left_join(num_genre_positive, num_genre, by = 'genre') %>%
+  mutate(prop = n1/n2) %>% 
+  select(genre, prop) %>% 
+  arrange(desc(prop)) %>%
+  ungroup()
+```
+
+```{r negative graph1, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_genre_negative = prop_genre_negative %>% 
+  mutate(genre = reorder(genre, prop)) %>%
+  ggplot(aes(x = genre, y = prop)) + 
+  geom_col(fill = 'blue', alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Proportion of negative song", 
+       subtitle = "Group by Genre",
+       y = "Proportion", x = 'Genre') + 
+  my_theme
+gcol_genre_negative
+```
+
+```{r positive graph1, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_genre_positive = prop_genre_positive %>% 
+  mutate(genre = reorder(genre, prop)) %>%
+  ggplot(aes(x = genre, y = prop)) + 
+  geom_col(fill = 'blue', alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Proportion of positive song", 
+       subtitle = "Group by Genre", 
+       y = "Proportion", x = 'Genre') + 
+  my_theme
+gcol_genre_positive
+```
+
+```{r proportion of emotion2, warning=FALSE, message=FALSE, echo=FALSE}
+# Number of negative songs group by country
+num_country_negative = dt_negative %>% 
+  group_by(country) %>% 
+  count(name = 'n1')
+# Number of positive songs group by country
+num_country_positive = dt_positive %>% 
+  group_by(country) %>% 
+  count(name = 'n1')
+# Number of all songs group by genre
+num_country = dt_country %>% 
+  group_by(country) %>% 
+  count(name = 'n2') %>% 
+  arrange(desc(n2))
+# Proportion of negative songs
+prop_country_negative = left_join(num_country_negative, num_country, by = 'country') %>%
+  mutate(prop = n1/n2) %>% 
+  select(country, prop) %>% 
+  arrange(desc(prop)) %>%
+  ungroup()
+# Proportion of positive songs
+prop_country_positive = left_join(num_country_positive, num_country, by = 'country') %>%
+  mutate(prop = n1/n2) %>% 
+  select(country, prop) %>% 
+  arrange(desc(prop)) %>%
+  ungroup()
+```
+
+```{r negative graph2, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_country_negative = prop_country_negative[1:20,] %>% 
+  mutate(country = reorder(country, prop)) %>%
+  ggplot(aes(x = country, y = prop)) + 
+  geom_col(fill = 'green', alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Proportion of negative song", 
+       subtitle = "Group by Region", 
+       y = "Proportion", x = 'Region') + 
+  my_theme
+gcol_country_negative
+```
+
+```{r positive graph2, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_country_positive = prop_country_positive[1:20,] %>% 
+  mutate(country = reorder(country, prop)) %>%
+  ggplot(aes(x = country, y = prop)) + 
+  geom_col(fill = 'green', alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Proportion of positive song",
+       subtitle = "Group by Region",
+       y = "Proportion", x = 'Region') + 
+  my_theme
+gcol_country_positive
+```
+
+```{r proportion of emotion3, warning=FALSE, message=FALSE, echo=FALSE}
+# Number of negative songs group by year
+num_year_negative = dt_negative %>% 
+  group_by(year) %>% 
+  count(name = 'n1')
+# Number of positive songs group by year
+num_year_positive = dt_positive %>% 
+  group_by(year) %>% 
+  count(name = 'n1')
+# Number of all songs group by year
+num_year = dt_lyrics %>% 
+  group_by(year) %>% 
+  count(name = 'n2') %>% 
+  arrange(desc(n2))
+# Proportion of negative songs
+prop_year_negative = left_join(num_year_negative, num_year, by = 'year') %>%
+  mutate(prop = n1/n2) %>% 
+  select(year, prop) %>% 
+  arrange(desc(prop)) %>%
+  ungroup()
+# Proportion of negative songs
+prop_year_positive = left_join(num_year_positive, num_year, by = 'year') %>%
+  mutate(prop = n1/n2) %>% 
+  select(year, prop) %>% 
+  arrange(desc(prop)) %>%
+  ungroup()
+```
+
+```{r negative graph3, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_year_negative = prop_year_negative[1:20,] %>% 
+  mutate(year = reorder(year, prop)) %>%
+  ggplot(aes(x = year, y = prop)) + 
+  geom_col(fill = 'red', alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Proportion of negative song", 
+       subtitle = "Group by Year",
+       y = "Proportion", x = 'Year') + 
+  my_theme
+gcol_year_negative
+```
+
+```{r positive graph3, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_year_positive = prop_year_positive[1:20,] %>% 
+  mutate(year = reorder(year, prop)) %>%
+  ggplot(aes(x = year, y = prop)) + 
+  geom_col(fill = 'red', alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Proportion of positive song",
+       subtitle = "Group by Year",
+       y = "Proportion", x = 'Year') + 
+  my_theme
+gcol_year_positive
+```
+
+Metal and Hip-hop are the music genres with the most negative words and Jazz is with the least. Columbia, Phillippines and Russia are the regional using positive words while most of others use negative words more. Since there was only one song in 1968, the proportion reached 100%. In addition, the negative words were used the most in 1986 and 1982 and the least used in 1988.
+
+### Question 2 - What kind of music is out of the ordinary?
+
+From the shinyapp and statistical chart above, we can see that most of musics use words like 'love' and 'time'. we will be curious about such a question, what kind of music doesn't contain the most frequent words. After selecting the music that doesn't contain the most frequent 30 words, we can get music statistics in different categories as follows.
+
+```{r Proportion of wof1, warning=FALSE, message=FALSE, echo=FALSE}
+# Number of songs without frequent words group by genre
+num_genre_wof = dt_lyrics %>%  
+  select(genre, id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>%
+  group_by(id,genre) %>% 
+  mutate(num = ifelse(word %in% unlist(word_freq[1:30,1]), 1, 0)) %>% 
+  summarize(num = sum(num)) %>% 
+  filter(num == 0) %>%
+  ungroup() %>%
+  select(genre) %>%
+  group_by(genre) %>% 
+  count(name = 'n1') %>% 
+  arrange(desc(n1))
+# Proportion of songs without frequent words group by genre
+prop_genre_wof = left_join(num_genre_wof, num_genre, by = 'genre') %>%
+  mutate(prop = n1/n2) %>% 
+  select(genre, prop) %>% 
+  arrange(desc(prop)) %>%
+  ungroup()
+```
+
+```{r wof graph1, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_genre_wof = prop_genre_wof %>% 
+  mutate(genre = reorder(genre, prop)) %>%
+  ggplot(aes(x = genre, y = prop)) + 
+  geom_col(fill = 'blue', alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Proportion of music without frequent words", 
+       subtitle = "Group by Genre",
+       y = "Proportion", x = 'Genre') + 
+  my_theme
+gcol_genre_wof
+```
+
+```{r Proportion of wof2, warning=FALSE, message=FALSE, echo=FALSE}
+# Number of songs without frequent words group by country
+num_country_wof = dt_country %>%  
+  select(country, id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>%
+  group_by(id,country) %>% 
+  mutate(num = ifelse(word %in% unlist(word_freq[1:30,1]), 1, 0)) %>% 
+  summarize(num = sum(num)) %>% 
+  filter(num == 0) %>%
+  ungroup() %>%
+  select(country) %>%
+  group_by(country) %>% 
+  count(name = 'n1') %>% 
+  arrange(desc(n1))
+# Proportion of songs without frequent words group by country
+prop_country_wof = left_join(num_country_wof, num_country, by = 'country') %>%
+  mutate(prop = n1/n2) %>% 
+  select(country, prop) %>% 
+  arrange(desc(prop)) %>%
+  ungroup()
+```
+
+```{r wof graph2, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_country_wof = prop_country_wof[1:20,] %>% 
+  mutate(country = reorder(country, prop)) %>%
+  ggplot(aes(x = country, y = prop)) + 
+  geom_col(fill = 'green', alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Proportion of music without frequent words", 
+       subtitle = "Group by Region",
+       y = "Proportion", x = 'Region') + 
+  my_theme
+gcol_country_wof
+```
+
+```{r Proportion of wof3, warning=FALSE, message=FALSE, echo=FALSE}
+# Number of songs without frequent words group by year
+num_year_wof = dt_lyrics %>%  
+  select(year, id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>%
+  group_by(id,year) %>% 
+  mutate(num = ifelse(word %in% unlist(word_freq[1:30,1]), 1, 0)) %>% 
+  summarize(num = sum(num)) %>% 
+  filter(num == 0) %>%
+  ungroup() %>%
+  select(year) %>%
+  group_by(year) %>% 
+  count(name = 'n1') %>% 
+  arrange(desc(n1))
+# Proportion of songs without frequent words group by year
+prop_year_wof = left_join(num_year_wof, num_year, by = 'year') %>%
+  mutate(prop = n1/n2) %>% 
+  select(year, prop) %>% 
+  arrange(desc(prop)) %>%
+  ungroup()
+```
+
+```{r wof graph3, warning=FALSE, message=FALSE, echo=FALSE}
+gcol_year_wof = prop_year_wof[1:20,] %>% 
+  mutate(year = reorder(year, prop)) %>%
+  ggplot(aes(x = year, y = prop)) + 
+  geom_col(fill = 'red', alpha = 0.6) + 
+  coord_flip() +
+  labs(title = "Proportion of music without frequent words", 
+       subtitle = "Group by year",
+       y = "Proportion", x = 'Year') + 
+  my_theme
+gcol_year_wof
+```
+
+These statisical graphs show that electronic music uses the least high-frequency words when classifying music genres. Rhode Island, Japan, Spain, France, Suffolk and British Columbia use the least frequent words when classifying by country and people used the least frequent words in 1972, 1970 and 1974.Then, what are the musical keywords for these genres, places and times?
+
+```{r word frequency1, warning=FALSE, message=FALSE, echo=FALSE}
+# Data of lyrics in Electronic
+dt_stemmedwords_genre = dt_join %>% 
+  filter(genre == 'Electronic') %>%
+  select(id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>% 
+  group_by(id, word) %>% 
+  unique() %>% 
+  ungroup()
+# Frequency of infrequently words in Electronic
+word_freq_genre = dt_stemmedwords_genre %>% 
+  group_by(word) %>%
+  count() %>% 
+  ungroup() %>%
+  mutate(freq = n/nrow(word_freq)) %>%
+  arrange(desc(freq)) %>% 
+  anti_join(word_freq[1:30,], by = 'word')
+```
+
+```{r wordcloud1, warning=FALSE, message=FALSE, echo=FALSE}
+wordcloud(word_freq_genre$word,word_freq_genre$n,
+          scale=c(1.5,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.2,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Blues"))
+```
+
+```{r word frequency2, warning=FALSE, message=FALSE, echo=FALSE}
+# Data of lyrics in some regions
+dt_stemmedwords_country = dt_country %>% 
+  filter(country %in% c('Rhode Island', 'Japan', 'Spain', 'France', 'Suffolk', 'British Columbia')) %>%
+  select(id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>% 
+  group_by(id, word) %>% 
+  unique() %>% 
+  ungroup()
+# Frequency of infrequently words in some regions
+word_freq_country = dt_stemmedwords_country %>% 
+  group_by(word) %>%
+  count() %>% 
+  ungroup() %>%
+  mutate(freq = n/nrow(word_freq)) %>%
+  arrange(desc(freq)) %>% 
+  anti_join(word_freq[1:30,], by = 'word')
+```
+
+```{r wordcloud2, warning=FALSE, message=FALSE, echo=FALSE}
+wordcloud(word_freq_country$word,word_freq_country$n,
+          scale=c(1.5,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.2,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"BuGn"))
+```
+
+```{r word frequency3, warning=FALSE, message=FALSE, echo=FALSE}
+# Data of lyrics in some years
+dt_stemmedwords_year = dt_join %>% 
+  filter(year %in% c(1972, 1970, 1974)) %>%
+  select(id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>% 
+  group_by(id, word) %>% 
+  unique() %>% 
+  ungroup()
+# Frequency of infrequently words in some years
+word_freq_year = dt_stemmedwords_year %>% 
+  group_by(word) %>%
+  count() %>% 
+  ungroup() %>%
+  mutate(freq = n/nrow(word_freq)) %>%
+  arrange(desc(freq)) %>% 
+  anti_join(word_freq[1:30,], by = 'word')
+```
+
+```{r wordcloud3, warning=FALSE, message=FALSE, echo=FALSE}
+wordcloud(word_freq_year$word,word_freq_year$n,
+          scale=c(1.5,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.2,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"OrRd"))
+```
+
+The hue of the graphs above are consistent with the previous graphs. We can see that 'feeling', 'play', 'inside' are more used by Electronic music. These words also match the entertaining nature of this kind of music. 'burn', 'soul', 'lost' are more used in those regions above, many negative words appear in wordcloud. It it related to the instability in these areas. In 1970s, 'people', 'friend' and 'stand' used a lot. It can be seen that this is an age of peaceful development. 
+
+Frequent words are related to their characteristics, and they often appear in any lyrics. However, words other than them can better reflect the real thoughts of people in a certain region, era, and character. Statistics on these words can better reflect the story behind the lyrics.
+
+### Conclusions
+
+1. Even though most of the music uses mostly positive words, negative words are actually used more frequently around the world.
+2. When the emotion of the music is scored, the resulting distribution is similar to the Poisson distribution. This distribution fits well, may make people doubt about the reality of the data.
+3. Frequent words appear frequently in any lyrics. After removing them, you can see the words that discribe the era and region.
+
+
+
+

@@ -1,4 +1,4 @@
-# ADS Project 1:  R Notebook on Lyrics Analysis
+# ADS Project 1:  The truth behind the lyrics
 
 ### Doc folder
 
