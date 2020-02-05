@@ -1,0 +1,157 @@
+---
+title: "Project Shinyapp"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Authorï¼? Jinxu Xiang
+
+Since shinyapp cannot be displayed in html, I put this part of code here. Many variables can be controlled in shinyapp, which can help me quickly find keywords.
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+packages.used=c("tm", "tidytext","tidyverse","DT","wordcloud","scales","gridExtra","ngram","igraph","ggraph","rsconnect")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+
+# load packages
+library(tm)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(wordcloud)
+library(wordcloud2)
+library(scales)
+library(gridExtra)
+library(ngram)
+library(igraph)
+library(ggraph)
+library(rsconnect)
+library(ggplot2)
+library(shiny)
+library(data.table)
+```
+
+```{r load data, warning=FALSE, message=FALSE, echo=FALSE}
+# Load all processed data
+load('../output/processed_lyrics.RData') 
+load('../output/processed_join.RData')
+load('../output/processed_country.RData') 
+```
+
+```{r list, warning=FALSE, message=FALSE, echo=FALSE}
+# List of country
+country_list = dt_country %>% select(country) %>% unique()
+country_list = rbind('All Region', country_list)
+# List of genre
+genre_list <- c("All Genre", "Folk", "R&B", "Electronic", "Jazz", "Indie", "Country", "Rock", "Metal", "Pop", "Hip-Hop", "Other")
+# The first year and the last year of data
+year = c(min(dt_join$year[dt_join$year>1900]), max(dt_join$year))
+
+corpus <- VCorpus(VectorSource(dt_lyrics$stemmedwords))
+word_tibble <- tidy(corpus) %>%
+  select(text) %>%
+  mutate(id = row_number()) %>%
+  unnest_tokens(word, text)
+```
+
+```{r ui, warning=FALSE, message=FALSE, echo=FALSE}
+ui <- navbarPage(strong("Lyrics Analysis"),
+  tabPanel("Select on a global scale",
+    titlePanel("Most frequent words"),
+    sidebarLayout(
+      sidebarPanel(
+        selectInput('genre1', 'Genre:', 
+                    genre_list, selected='All Genre'),
+        selectInput('country1', 'Region:', 
+                    country_list, selected='All Region'),
+        sliderInput("year1", "Year Interval:",
+                min = year[1], max = year[2], value = c(year[1], year[2])),
+        sliderInput("nwords1", "Number of terms:",
+                    min = 5, max = 100, value = 50)
+      ),
+      mainPanel(
+        wordcloud2Output(outputId = "country", height = "300")
+      )
+    )
+  ),
+  
+  tabPanel("Data", 
+           DT::dataTableOutput("table"))
+)
+```
+
+```{r server, warning=FALSE, message=FALSE, echo=FALSE}
+server <- function(input, output) {
+  # Use if and else to distinguish all select and part select.
+  output$country <- renderWordcloud2({
+    if(input$country1 == 'All Region' & input$genre1 == 'All Genre'){
+      count(
+      filter(
+        word_tibble, 
+        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
+      ), 
+      word, sort = TRUE
+    ) %>%
+      slice(1:input$nwords1) %>%
+      wordcloud2(size=0.6, rotateRatio=0.2)
+    }
+    else if(input$country1 != 'All Region' & input$genre1 == 'All Genre'){
+      count(
+      filter(
+        word_tibble, 
+        id %in% which(dt_country$country == input$country1), 
+        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
+      ), 
+      word, sort = TRUE
+    ) %>%
+      slice(1:input$nwords1) %>%
+      wordcloud2(size=0.6, rotateRatio=0.2)
+    }
+    else if(input$country1 == 'All Region' & input$genre1 != 'All Genre'){
+      count(
+      filter(
+        word_tibble, 
+        id %in% which(dt_lyrics$genre == input$genre1), 
+        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
+      ), 
+      word, sort = TRUE
+    ) %>%
+      slice(1:input$nwords1) %>%
+      wordcloud2(size=0.6, rotateRatio=0.2)
+    }
+    else{
+      count(
+      filter(
+        word_tibble, 
+        id %in% which(dt_country$country == input$country1), 
+        id %in% which(dt_lyrics$genre == input$genre1), 
+        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
+      ), 
+      word, sort = TRUE
+    ) %>%
+      slice(1:input$nwords1) %>%
+      wordcloud2(size=0.6, rotateRatio=0.2)
+    }
+  })
+  
+  output$table <- DT::renderDataTable({
+    DT::datatable(dt_join)
+  })
+}
+```
+
+```{r shiny app, warning=FALSE, message=FALSE}
+shinyApp(ui, server)
+```
+
+

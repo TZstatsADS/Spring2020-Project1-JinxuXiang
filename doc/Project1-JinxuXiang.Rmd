@@ -1,8 +1,8 @@
 ---
 title: "The truth behind the lyrics"
 output:
-  html_document: default
   pdf_document: default
+  html_document: default
 ---
 ## Author: Jinxu Xiang
 ```{r, warning=FALSE, message=FALSE,echo=FALSE}
@@ -106,113 +106,7 @@ This is the wordcloud of all lyrics. As you can see, the word 'love', 'light', '
 
 ### Question 1 - Is it true that most of music is positive?
 
-To quickly find answers, first I made a dynamic shinyapp to search keywords under different condition. I designed the drop-down tab to select different genres and regions, and the slider to select the year interval. If you want to select all genres or regions, you can select 'All genres' or 'All Region'. (However, this cannot be displayed after being stored as html)
-
-```{r list, warning=FALSE, message=FALSE, echo=FALSE}
-# List of country
-country_list = dt_country %>% select(country) %>% unique()
-country_list = rbind('All Region', country_list)
-# List of genre
-genre_list <- c("All Genre", "Folk", "R&B", "Electronic", "Jazz", "Indie", "Country", "Rock", "Metal", "Pop", "Hip-Hop", "Other")
-# The first year and the last year of data
-year = c(min(dt_join$year[dt_join$year>1900]), max(dt_join$year))
-
-corpus <- VCorpus(VectorSource(dt_lyrics$stemmedwords))
-word_tibble <- tidy(corpus) %>%
-  select(text) %>%
-  mutate(id = row_number()) %>%
-  unnest_tokens(word, text)
-```
-
-```{r ui, warning=FALSE, message=FALSE, echo=FALSE}
-ui <- navbarPage(strong("Lyrics Analysis"),
-  tabPanel("Select on a global scale",
-    titlePanel("Most frequent words"),
-    sidebarLayout(
-      sidebarPanel(
-        selectInput('genre1', 'Genre:', 
-                    genre_list, selected='All Genre'),
-        selectInput('country1', 'Region:', 
-                    country_list, selected='All Region'),
-        sliderInput("year1", "Year Interval:",
-                min = year[1], max = year[2], value = c(year[1], year[2])),
-        sliderInput("nwords1", "Number of terms:",
-                    min = 5, max = 100, value = 50)
-      ),
-      mainPanel(
-        wordcloud2Output(outputId = "country", height = "300")
-      )
-    )
-  ),
-  
-  tabPanel("Data", 
-           DT::dataTableOutput("table"))
-)
-```
-
-```{r server, warning=FALSE, message=FALSE, echo=FALSE}
-server <- function(input, output) {
-  # Use if and else to distinguish all select and part select.
-  output$country <- renderWordcloud2({
-    if(input$country1 == 'All Region' & input$genre1 == 'All Genre'){
-      count(
-      filter(
-        word_tibble, 
-        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
-      ), 
-      word, sort = TRUE
-    ) %>%
-      slice(1:input$nwords1) %>%
-      wordcloud2(size=0.6, rotateRatio=0.2)
-    }
-    else if(input$country1 != 'All Region' & input$genre1 == 'All Genre'){
-      count(
-      filter(
-        word_tibble, 
-        id %in% which(dt_country$country == input$country1), 
-        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
-      ), 
-      word, sort = TRUE
-    ) %>%
-      slice(1:input$nwords1) %>%
-      wordcloud2(size=0.6, rotateRatio=0.2)
-    }
-    else if(input$country1 == 'All Region' & input$genre1 != 'All Genre'){
-      count(
-      filter(
-        word_tibble, 
-        id %in% which(dt_lyrics$genre == input$genre1), 
-        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
-      ), 
-      word, sort = TRUE
-    ) %>%
-      slice(1:input$nwords1) %>%
-      wordcloud2(size=0.6, rotateRatio=0.2)
-    }
-    else{
-      count(
-      filter(
-        word_tibble, 
-        id %in% which(dt_country$country == input$country1), 
-        id %in% which(dt_lyrics$genre == input$genre1), 
-        id %in% which(dt_join$year >= input$year1[1] & dt_join$year <= input$year1[2])
-      ), 
-      word, sort = TRUE
-    ) %>%
-      slice(1:input$nwords1) %>%
-      wordcloud2(size=0.6, rotateRatio=0.2)
-    }
-  })
-  
-  output$table <- DT::renderDataTable({
-    DT::datatable(dt_join)
-  })
-}
-```
-
-```{r shiny app, warning=FALSE, message=FALSE}
-shinyApp(ui, server)
-```
+To quickly find answers, first I made a dynamic shinyapp to search keywords under different condition. I designed the drop-down tab to select different genres and regions, and the slider to select the year interval. If you want to select all genres or regions, you can select 'All genres' or 'All Region'. However, this cannot be displayed after being stored as html, so I put it in 'Project1-shinyapp' in 'doc' file.
 
 After using shinyapp to control variables, I have a preliminary understanding of the question I want to do. Next I use dataset 'bing' (from Bing Liu and collaborators, https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html) to distinguish positive and negative words. 
 
@@ -475,7 +369,7 @@ Metal and Hip-hop are the music genres with the most negative words and Jazz is 
 
 ### Question 2 - What kind of music is out of the ordinary?
 
-From the shinyapp and statistical chart above, we can see that most of music uses words like 'love' and 'time'. we will be curious about such a question, what kind of music doesn't contain the most frequent words. After selecting the music that doesn't contain the most frequent 30 words, we can get music statistics in different categories as follows.
+From the shinyapp and statistical chart above, we can see that most of music uses words like 'love' and 'time'. we will be curious about such a question, what kind of music doesn't contain the most frequent words. After selecting the music that doesn't contain the most frequent 15 words, we can get music statistics in different categories as follows.
 
 ```{r Proportion of wof1, warning=FALSE, message=FALSE, echo=FALSE}
 # Number of songs without frequent words group by genre
@@ -483,7 +377,7 @@ num_genre_wof = dt_lyrics %>%
   select(genre, id, stemmedwords) %>% 
   unnest_tokens(word, stemmedwords) %>%
   group_by(id,genre) %>% 
-  mutate(num = ifelse(word %in% unlist(word_freq[1:30,1]), 1, 0)) %>% 
+  mutate(num = ifelse(word %in% unlist(word_freq[1:15,1]), 1, 0)) %>% 
   summarize(num = sum(num)) %>% 
   filter(num == 0) %>%
   ungroup() %>%
@@ -518,7 +412,7 @@ num_country_wof = dt_country %>%
   select(country, id, stemmedwords) %>% 
   unnest_tokens(word, stemmedwords) %>%
   group_by(id,country) %>% 
-  mutate(num = ifelse(word %in% unlist(word_freq[1:30,1]), 1, 0)) %>% 
+  mutate(num = ifelse(word %in% unlist(word_freq[1:15,1]), 1, 0)) %>% 
   summarize(num = sum(num)) %>% 
   filter(num == 0) %>%
   ungroup() %>%
@@ -553,7 +447,7 @@ num_year_wof = dt_lyrics %>%
   select(year, id, stemmedwords) %>% 
   unnest_tokens(word, stemmedwords) %>%
   group_by(id,year) %>% 
-  mutate(num = ifelse(word %in% unlist(word_freq[1:30,1]), 1, 0)) %>% 
+  mutate(num = ifelse(word %in% unlist(word_freq[1:15,1]), 1, 0)) %>% 
   summarize(num = sum(num)) %>% 
   filter(num == 0) %>%
   ungroup() %>%
@@ -582,7 +476,39 @@ gcol_year_wof = prop_year_wof[1:20,] %>%
 gcol_year_wof
 ```
 
-These statisical graphs show that electronic music uses the least high-frequency words when classifying music genres. Rhode Island, Japan, Spain, France, Suffolk and British Columbia use the least frequent words when classifying by country and people used the least frequent words in 1972, 1970 and 1974.Then, what are the musical keywords for these genres, places and times?
+These statisical graphs show that electronic music uses the least high-frequency words when classifying music genres. Rhode Island, Japan,  British Columbia, France and Western Australia use the least frequent words when classifying by country and people used the least frequent words in 1972, 1970, 1981 and 1974.Then, what are the musical keywords for these genres, places and times?
+
+```{r word frequency test, warning=FALSE, message=FALSE, echo=FALSE}
+# Data of lyrics in Electronic
+dt_stemmedwords_test = dt_join %>% 
+  filter(genre == 'Electronic') %>%
+  select(id, stemmedwords) %>% 
+  unnest_tokens(word, stemmedwords) %>% 
+  group_by(id, word) %>% 
+  unique() %>% 
+  ungroup()
+# Frequency of infrequently words in Electronic
+word_freq_test = dt_stemmedwords_test %>% 
+  group_by(word) %>%
+  count() %>% 
+  ungroup() %>%
+  mutate(freq = n/nrow(word_freq)) %>%
+  arrange(desc(freq))
+```
+
+```{r wordcloud test, warning=FALSE, message=FALSE, echo=FALSE}
+wordcloud(word_freq_test$word,word_freq_test$n,
+          scale=c(1.5,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.2,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"BuPu"))
+```
+
+If we don't remove high-frequency words, taking Electronic genre as an example, then even the most distinctive genre, its main words are still 'love' and 'time'. We can't see the essence behind lyrics just by categorizing them like this, because the characteristics of these words determine that they are suitable to every music. So in the following analysis, I removed the 15 most frequent words.
 
 ```{r word frequency1, warning=FALSE, message=FALSE, echo=FALSE}
 # Data of lyrics in Electronic
@@ -600,7 +526,7 @@ word_freq_genre = dt_stemmedwords_genre %>%
   ungroup() %>%
   mutate(freq = n/nrow(word_freq)) %>%
   arrange(desc(freq)) %>% 
-  anti_join(word_freq[1:30,], by = 'word')
+  anti_join(word_freq[1:15,], by = 'word')
 ```
 
 ```{r wordcloud1, warning=FALSE, message=FALSE, echo=FALSE}
@@ -618,7 +544,7 @@ wordcloud(word_freq_genre$word,word_freq_genre$n,
 ```{r word frequency2, warning=FALSE, message=FALSE, echo=FALSE}
 # Data of lyrics in some regions
 dt_stemmedwords_country = dt_country %>% 
-  filter(country %in% c('Rhode Island', 'Japan', 'Spain', 'France', 'Suffolk', 'British Columbia')) %>%
+  filter(country %in% c('Rhode Island', 'Japan',  'France', 'British Columbia', 'Western Australia')) %>%
   select(id, stemmedwords) %>% 
   unnest_tokens(word, stemmedwords) %>% 
   group_by(id, word) %>% 
@@ -631,7 +557,7 @@ word_freq_country = dt_stemmedwords_country %>%
   ungroup() %>%
   mutate(freq = n/nrow(word_freq)) %>%
   arrange(desc(freq)) %>% 
-  anti_join(word_freq[1:30,], by = 'word')
+  anti_join(word_freq[1:15,], by = 'word')
 ```
 
 ```{r wordcloud2, warning=FALSE, message=FALSE, echo=FALSE}
@@ -662,7 +588,7 @@ word_freq_year = dt_stemmedwords_year %>%
   ungroup() %>%
   mutate(freq = n/nrow(word_freq)) %>%
   arrange(desc(freq)) %>% 
-  anti_join(word_freq[1:30,], by = 'word')
+  anti_join(word_freq[1:15,], by = 'word')
 ```
 
 ```{r wordcloud3, warning=FALSE, message=FALSE, echo=FALSE}
@@ -677,7 +603,7 @@ wordcloud(word_freq_year$word,word_freq_year$n,
           colors=brewer.pal(9,"OrRd"))
 ```
 
-The hue of the graphs above are consistent with the previous graphs. We can see that 'feeling', 'play', 'inside' are more used by Electronic music. These words also match the entertaining nature of this kind of music. 'burn', 'soul', 'lost' are more used in those regions above, many negative words appear in wordcloud. It it related to the instability in these areas. In 1970s, 'people', 'friend' and 'stand' used a lot. It can be seen that this is an age of peaceful development. 
+The hue of the graphs above are consistent with the previous graphs. We can see that 'feeling', 'light', 'dream' are more used by Electronic music. These words also match the entertaining nature of this kind of music. 'burn', 'fall', 'lost' are more used in those regions above, many negative words appear in wordcloud. It it related to the instability in these areas. In 1970s, 'people', 'friend' and 'stand' used a lot. It can be seen that this is an age of peaceful development. 
 
 Frequent words are related to their characteristics, and they often appear in any lyrics. However, words other than them can better reflect the real thoughts of people in a certain region, era, and character. Statistics on these words can better reflect the story behind the lyrics.
 

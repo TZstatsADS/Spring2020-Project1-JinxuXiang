@@ -12,10 +12,40 @@ knitr::opts_chunk$set(echo = TRUE)
 In this file, I did two steps. First,I processed the raw textual data 'lyrics.RData' saved in 'data' file by cleaning data, removing stopwords and creating a tidy version of texts which is saved in 'output' file. 
 Then,I combined the processed text with artist information 'artists.csv' and saved the joint data in 'output' file. The 'Origin' column of joint data contains the name of city and country (or state in America). So I extracted the names of each reigon and saved it as 'Precessed_country'.
 
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+packages.used=c("tm", "tidytext","tidyverse","DT","wordcloud","scales","gridExtra","ngram","igraph","ggraph","rsconnect")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+
+# load packages
+library(tm)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(wordcloud)
+library(wordcloud2)
+library(scales)
+library(gridExtra)
+library(ngram)
+library(igraph)
+library(ggraph)
+library(rsconnect)
+library(ggplot2)
+library(shiny)
+library(data.table)
+```
+
 ```{r read data, warning=FALSE, message=FALSE, echo=FALSE}
 # The next few steps are used to initially process the data.
 # I saved all processed data in 'output' file.
-# If you need to load directly, you can skip to 'r load data'.
+# If you need to load directly, you can skip to 'r load data' in main rmd.
 
 # load lyrics data
 load('../data/lyrics.RData') 
