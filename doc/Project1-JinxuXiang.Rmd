@@ -1,8 +1,8 @@
 ---
 title: "The truth behind the lyrics"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 ---
 ## Author: Jinxu Xiang
 ```{r, warning=FALSE, message=FALSE,echo=FALSE}
@@ -45,123 +45,16 @@ This report is prepared with the following environmental settings.
 print(R.version)
 ```
 
-```{r read data, warning=FALSE, message=FALSE, echo=FALSE}
-# load lyrics data
-load('../data/lyrics.RData') 
-```
-
-```{r text processing in tm, warning=FALSE, message=FALSE, echo=FALSE}
-# function for removimg leading and trailing whitespace from character strings 
-leadingWhitespace <- content_transformer(function(x) str_trim(x, side = "both"))
-# remove stop words
-data("stop_words")
-word <- c("lot", "today", "months", "month", "wanna", "wouldnt", "wasnt", "ha", "na", "ooh", "da",
-        "gonna", "im", "dont", "aint", "wont", "yeah", "la", "oi", "nigga", "fuck",
-          "hey", "year", "years", "last", "past", "feel")
-stop_words <- c(stop_words$word, word)
-# clean the data and make a corpus
-corpus <- VCorpus(VectorSource(dt_lyrics$lyrics))%>%
-  tm_map(content_transformer(tolower))%>%
-  tm_map(removePunctuation)%>%
-  tm_map(removeWords, character(0))%>%
-  tm_map(removeWords, stop_words)%>%
-  tm_map(removeNumbers)%>%
-  tm_map(stripWhitespace)%>%
-  tm_map(leadingWhitespace)
-```
-
-```{r stemming, warning=FALSE, message=FALSE, echo=FALSE}
-stemmed <- tm_map(corpus, stemDocument) %>%
-  tidy() %>%
-  select(text)
-```
-
-```{r tidy dictionary, warning=FALSE, message=FALSE, echo=FALSE}
-dict <- tidy(corpus) %>%
-  select(text) %>%
-  unnest_tokens(dictionary, text)
-```
-
-```{r tidy stems with dictionary, warning=FALSE, message=FALSE, echo=FALSE}
-completed <- stemmed %>%
-  mutate(id = row_number()) %>%
-  unnest_tokens(stems, text) %>%
-  bind_cols(dict) 
-```
-
-```{r stem completion, warning=FALSE, message=FALSE, echo=FALSE}
-completed <- completed %>%
-  group_by(stems) %>%
-  count(dictionary) %>%
-  mutate(word = dictionary[which.max(n)]) %>%
-  ungroup() %>%
-  select(stems, word) %>%
-  distinct() %>%
-  right_join(completed) %>%
-  select(-stems)
-```
-
-```{r reverse unnest, warning=FALSE, message=FALSE, echo=FALSE}
-completed <- completed %>%
-  group_by(id) %>%
-  summarise(stemmedwords= str_c(word, collapse = " ")) %>%
-  ungroup()
-```
-
-```{r cleaned hm_data, warning=FALSE, message=FALSE, echo=FALSE}
-dt_lyrics <- dt_lyrics %>%
-  mutate(id = row_number()) %>%
-  inner_join(completed)
-```
-
-```{r export data lyrics, warning=FALSE, message=FALSE, echo=FALSE}
-save(dt_lyrics, file="../output/processed_lyrics.RData")
-```
-
-First,I process the raw textual data 'lyrics.RData' saved in 'data' file by cleaning data, removing stopwords and creating a tidy version of texts which is saved in 'output' file.
-
-```{r load data lyrics, warning=FALSE, message=FALSE, echo=FALSE}
-# load lyrics data
+```{r load data, warning=FALSE, message=FALSE, echo=FALSE}
+# Load all processed data
 load('../output/processed_lyrics.RData') 
-# load artist information
-dt_artist <- fread('../data/artists.csv') 
-# join two data by artist
-dt_join = left_join(dt_lyrics, dt_artist, by = c('artist' = 'Artist')) %>%
-  mutate(artist = ifelse(is.na(artist), 'Other', artist)) %>% 
-  select(-song, -lyrics, -Intro, - Formed, -Members) %>% 
-  filter(year > 1900)
-
-# Change all American cities' name in Origin to 'American' and only leave country names.
-
-dt_country = dt_join %>% 
-  separate(Origin, into = c('city','country'), sep = ',') %>%
-  mutate(country= ifelse(is.na(country), 'Other', country)) %>%
-  mutate(country = substr(country, 2, nchar(country))) 
-
-state_to_name = dt_country$country %>% unique()
-state_to_name = state_to_name[substr(state_to_name,1,2) %in% state.abb]
-state_to_name = tibble(state = state_to_name) %>% 
-  mutate(num = map_dbl(state, ~which(substr(.x,1,2) == state.abb))) %>% 
-  mutate(name = state.name[num]) %>% 
-  select(-num)
-
-dt_country = dt_country %>% left_join(state_to_name, by = c('country' = 'state')) %>% 
-  mutate(country = ifelse(is.na(name), country, name)) %>%
-  arrange(country) %>% 
-  select(-city, -name)
-```
-
-```{r export data join, warning=FALSE, message=FALSE, echo=FALSE}
-save(dt_join, file="../output/processed_join.RData")
-save(dt_country, file="../output/processed_country.RData")
-```
-
-```{r load data join, warning=FALSE, message=FALSE, echo=FALSE}
 load('../output/processed_join.RData')
 load('../output/processed_country.RData') 
 ```
 
-Then,I combine the processed text with artist information 'artists.csv' and saved the joint data in 'output' file. The 'Origin' column of joint data contains the name of city and country (or state in America). So I extracted the names of each reigon and saved it as 'Precessed_country'.
+First,I processed the raw textual data 'lyrics.RData' saved in 'data' file by cleaning data, removing stopwords and creating a tidy version of texts which is saved in 'output' file.
+
+Then,I combined the processed text with artist information 'artists.csv' and saved the joint data in 'output' file. The 'Origin' column of joint data contains the name of city and country (or state in America). So I extracted the names of each reigon and saved it as 'Precessed_country'.
 
 ```{r my theme, warning=FALSE, message=FALSE, echo=FALSE}
 # My theme
@@ -213,7 +106,7 @@ This is the wordcloud of all lyrics. As you can see, the word 'love', 'light', '
 
 ### Question 1 - Is it true that most of music is positive?
 
-To quickly find answers, first I make a dynamic shinyapp to search keywords under different condition. I designed the drop-down tab to select different genres and regions, and the slider to select the year interval. If you want to select all genres or regions, you can select 'All genres' or 'All Region'. (However, this cannot be displayed after being stored as html)
+To quickly find answers, first I made a dynamic shinyapp to search keywords under different condition. I designed the drop-down tab to select different genres and regions, and the slider to select the year interval. If you want to select all genres or regions, you can select 'All genres' or 'All Region'. (However, this cannot be displayed after being stored as html)
 
 ```{r list, warning=FALSE, message=FALSE, echo=FALSE}
 # List of country
@@ -391,7 +284,7 @@ gbar_emotionscore2 = score_id2 %>%
 gbar_emotionscore2
 ```
 
-These two graphs above are the opposite of what I said before. Even though positive words occupy most of the wordcloud, about 70% musics use more negative words. In addition, the emotion score which each word only count once looks like Poisson distribution. This property may be used in more places. 
+These two graphs above are the opposite of what I said before. Even though positive words occupy most of the wordcloud, about 70% music use more negative words. In addition, the emotion score which each word only count once looks like Poisson distribution. This property may be used in more places. 
 
 The statistical model of this data is too good, it is difficult to imagine that the 120,000 data can get a distribution that looks a lot like the real distribution. In addition, considering that there are many strange author names, song names and lyrics in this dataset, it will increase people's doubt about the reality of this dataset.
 
@@ -582,7 +475,7 @@ Metal and Hip-hop are the music genres with the most negative words and Jazz is 
 
 ### Question 2 - What kind of music is out of the ordinary?
 
-From the shinyapp and statistical chart above, we can see that most of musics use words like 'love' and 'time'. we will be curious about such a question, what kind of music doesn't contain the most frequent words. After selecting the music that doesn't contain the most frequent 30 words, we can get music statistics in different categories as follows.
+From the shinyapp and statistical chart above, we can see that most of music uses words like 'love' and 'time'. we will be curious about such a question, what kind of music doesn't contain the most frequent words. After selecting the music that doesn't contain the most frequent 30 words, we can get music statistics in different categories as follows.
 
 ```{r Proportion of wof1, warning=FALSE, message=FALSE, echo=FALSE}
 # Number of songs without frequent words group by genre
